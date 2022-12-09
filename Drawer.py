@@ -1,13 +1,18 @@
 import glfw
 import numpy as np
+import time
 from OpenGL.GL import *
 from OpenGL.GLU import *
 from OpenGL.arrays import vbo
+from Particle import Particle
+from ParticleSystem import ParticleSystem
+from Solver import Solver
 
 class Drawer:
     def __init__(self, scale, interval):
         self.scale = scale
         self.interval = interval
+        self.solver = Solver()
 
     def drawFrame(self):
         glBegin(GL_LINES)
@@ -131,6 +136,40 @@ class Drawer:
         glVertex3fv([-scale + offset[0], offset[1], -scale + offset[2]])
         glVertex3fv([scale + offset[0], offset[1], scale + offset[2]])
         glEnd()
+
+    def drawLine(self, start_point, end_point):
+        glBegin(GL_LINES)
+        glVertex3f(start_point[0], start_point[1], start_point[2])
+        glVertex3f(end_point[0], end_point[1], end_point[2])
+        glEnd()
+
+    def drawPoint(self, point):
+        glBegin(GL_POINTS)
+        glVertex3f(point[0], point[1], point[2])
+        glEnd()
+
+    def drawParticles(self, particleSystem, run, fps):
+        delta_t = 0.008
+        step = int(1/(fps * delta_t))*10
+
+        if run == True:
+            for i in range(step):
+                #self.solver.eulerStep(particleSystem, delta_t)
+                self.solver.semiImplicitEulerStep(particleSystem, delta_t)
+
+        glLineWidth(2)
+        glPointSize(12)
+        for particle in particleSystem.particles:
+            if (particle.detected):
+                glColor3ub(255, 0, 0)
+            else:
+                glColor3ub(204, 154, 255)
+            self.drawPoint(particle.x)
+
+            glColor3ub(127, 0, 254)
+            for neighbor in particle.neighbors:
+                self.drawLine(particle.x, neighbor.x)
+        glLineWidth(1)
 
     def drawCube(self, height):
         #height = np.sqrt((end_point[0] ** 2) + (end_point[1] ** 2) + (end_point[2] ** 2))
