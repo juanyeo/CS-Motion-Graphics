@@ -14,6 +14,10 @@ from Posture import Posture
 from Drawer import *
 import MatrixUtil as util
 import MotionEditor as editor
+from Particle import Particle
+from ParticleSystem import ParticleSystem
+from Solver import Solver
+from ExternalForce import ExternalForce
 
 file_path = './motion_files/run.bvh'
 
@@ -48,6 +52,11 @@ class GLWidget(QOpenGLWidget):
         self.mouse_x = 0.
         self.mouse_y = 0.
         self.mode_ik = 0
+
+        self.cube_system = self.makeParticleCube()
+        self.foot_position = [100, 0, 100]
+
+        self.cloak_system = None
         
         self.setMouseTracking(False)
         self.setAcceptDrops(True)
@@ -93,9 +102,26 @@ class GLWidget(QOpenGLWidget):
         drawer.drawFrame()
 
         #ik_root_position = np.zeros(len(self.motion.posture_list[0].data))
+        current_foot_position = self.foot_position
+        if self.current_frame < self.motion.number_of_frames:
+            current_foot_position = self.motion.posture_list[self.current_frame].getJointPosition("rHand") # rHand rFoot
+        external = ExternalForce(10, self.foot_position, current_foot_position)
+        drawer.drawParticles(self.cube_system, self.run, self.fps, external, 12, (204, 154, 255), (127, 0, 254))
+        self.foot_position = current_foot_position
+
+        if self.current_frame == 0:
+            self.cloak_system = self.makeParticleCloak(
+            self.motion.posture_list[0].getJointPosition("rShldr"),
+            self.motion.posture_list[0].getJointPosition("lShldr"))
+        if self.current_frame < self.motion.number_of_frames:
+            self.cloak_system.stick_point1 = self.motion.posture_list[self.current_frame].getJointPosition("rShldr")
+            self.cloak_system.stick_point2 = self.motion.posture_list[self.current_frame].getJointPosition("lShldr")
+        drawer.drawParticles(self.cloak_system, self.run, self.fps, None, 3, (255, 153, 51), (255, 51, 51))
+
         height = self.motion.posture_list[0].data[1]
-        glColor3ub(255, 160, 0)
-        drawer.drawSinglePosture(self.ik_posture, height)
+        if (self.mode_ik > 0):
+            glColor3ub(255, 160, 0)
+            drawer.drawSinglePosture(self.ik_posture, height)
         #glColor3ub(255, 0, 0)
         #drawer.drawCube(180)
         glColor3ub(0, 255, 0)
@@ -147,6 +173,20 @@ class GLWidget(QOpenGLWidget):
             gCamHeight += 1
         elif event.key() == QtCore.Qt.Key.Key_E:
             gCamHeight -= 1
+        elif event.key() == QtCore.Qt.Key.Key_Z:
+            self.moveObject(0, 0, 10)
+        elif event.key() == QtCore.Qt.Key.Key_X:
+            self.moveObject(10, 0, 0)
+        elif event.key() == QtCore.Qt.Key.Key_C:
+            self.moveObject(0, 0, -10)
+        elif event.key() == QtCore.Qt.Key.Key_V:
+            self.moveObject(-10, 0, 0)
+        elif event.key() == QtCore.Qt.Key.Key_B:
+            self.moveObject(0, 10, 0)
+        elif event.key() == QtCore.Qt.Key.Key_N:
+            self.moveObject(0, -10, 0)
+        elif event.key() == QtCore.Qt.Key.Key_R:
+            self.cube_system = self.makeParticleCube()
         self.repaint()
 
     def dragEnterEvent(self, event: QtGui.QDragEnterEvent):
@@ -170,6 +210,12 @@ class GLWidget(QOpenGLWidget):
 
         self.repaint()
 
+    def moveObject(self, x, y, z):
+        delta_x = np.array([x, y, z])
+
+        for particle in self.cube_system.particles:
+            particle.x += delta_x
+
     def calculateIKVectors(self, target_point):
         a = self.ik_posture.getJointPosition(ik_joints[self.mode_ik-1][0])
         b = self.ik_posture.getJointPosition(ik_joints[self.mode_ik-1][1])
@@ -186,6 +232,76 @@ class GLWidget(QOpenGLWidget):
         self.ik_posture.rotation_matrix_dict[ik_joints[self.mode_ik-1][0]] = new_a_lr
         self.ik_posture.rotation_matrix_dict[ik_joints[self.mode_ik-1][1]] = new_b_lr
         self.repaint()
+
+    def makeParticleCube(self):
+        #offset = np.array([40, 60, 0]) # 40, 60, 0
+        offset = np.array([40, 360, 0])
+
+        positions = [[15., 6., 0.], [15., 27., 21.], [-15., 21., 21.],
+                        [-15., 0., 0.], [15., 27., -21.], [15., 48., 0.],
+                        [-15., 42., 0.], [-15., 21., -21.]]
+        mass = 10
+
+        cubeSystem = ParticleSystem()
+
+        for i in range(8):
+            particle = Particle()
+            particle.x = positions[i] + offset
+            particle.m = mass
+
+            if (i < 4):
+                particle.f = [100, 0, 0] 
+
+            cubeSystem.particles.append(particle)
+
+        cubeSystem.connection = [[1,2,3,4,5,7],
+                    [0,2,3,4,5,6],
+                    [0,1,3,5,6,7],
+                    [0,1,2,4,6,7],
+                    [0,1,3,5,6,7],
+                    [0,1,2,4,6,7],
+                    [1,2,3,4,5,7],
+                    [0,2,3,4,5,6]]
+
+        cubeSystem.initNeighborParticles()
+        cubeSystem.origin_positions = cubeSystem.getPositions()
+
+        return cubeSystem
+
+    def makeParticleCloak(self, offset1, offset2):
+        neck_point = np.array(offset1) + np.array(offset2)
+        neck_point /= 2.
+
+        positions = [[-18., 0., 0.], [-9., 0., 0.], [0., 0., 0.], [9., 0., 0.], [18., 0., 0.],
+                    [-26., -10., 0.], [-13., -10., 0.], [0., -10., 0.], [13., -10., 0.], [26., -10., 0.],
+                    [-34., -20., 0.], [-17., -20., 0.], [0., -20., 0.], [17., -20., 0.], [34., -20., 0.],
+                    [-42., -40., 0.], [-21., -40., 0.], [0., -40., 0.], [21., -40., 0.], [42., -40., 0.],
+                    [-50., -60., 0.], [-25., -60., 0.], [0., -60., 0.], [25., -60., 0.], [50., -60., 0.],]
+        mass = 10
+
+        cloakSystem = ParticleSystem()
+
+        for i in range(25):
+            particle = Particle()
+            particle.x = positions[i] + neck_point
+            particle.m = mass
+
+            cloakSystem.particles.append(particle)
+
+        cloakSystem.connection = [[1, 5], [0, 2, 6], [1, 3, 7], [2, 4, 8], [3, 9],
+                                [0, 6, 10], [1, 5, 7, 11], [2, 6, 8, 12], [3, 7, 9, 13], [4, 8, 14],
+                                [5, 11, 15], [6, 10, 12, 16], [7, 11, 13, 17], [8, 12, 14, 18], [9, 13, 19],
+                                [10, 16, 20], [11, 15, 17, 21], [12, 16, 18, 22], [13, 17, 19, 23], [14, 18, 24],
+                                [15, 21], [16, 20, 22], [17, 21, 23], [18, 22, 24], [19, 23]]
+
+        cloakSystem.initNeighborParticles()
+        cloakSystem.origin_positions = cloakSystem.getPositions()
+
+        cloakSystem.stick_point1 = offset1
+        cloakSystem.stick_point2 = offset2
+        cloakSystem.is_sticked = True
+
+        return cloakSystem
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
