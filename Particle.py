@@ -7,3 +7,4 @@ class Particle:
         self.f = [0, 0, 0]
         self.m = 0
         self.neighbors = []
+        self.detected = False
