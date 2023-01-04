@@ -148,28 +148,39 @@ class Drawer:
         glVertex3f(point[0], point[1], point[2])
         glEnd()
 
-    def drawParticles(self, particleSystem, run, fps):
+    def drawParticles(self, integration, particleSystem, run, fps, externalForce, pointSize, pointColor, lineColor):
         delta_t = 0.008
         step = int(1/(fps * delta_t))*10
+        #externalForce.delta_t = delta_t
 
         if run == True:
-            for i in range(step):
-                #self.solver.eulerStep(particleSystem, delta_t)
-                self.solver.semiImplicitEulerStep(particleSystem, delta_t)
+            if integration == 1:
+                for i in range(step):
+                    self.solver.semiImplicitEulerStep(particleSystem, delta_t, externalForce)
+            else:
+                for i in range(step):
+                    self.solver.eulerStep(particleSystem, delta_t, externalForce)
 
         glLineWidth(2)
-        glPointSize(12)
+        glPointSize(pointSize)
         for particle in particleSystem.particles:
             if (particle.detected):
                 glColor3ub(255, 0, 0)
             else:
-                glColor3ub(204, 154, 255)
+                glColor3ub(pointColor[0], pointColor[1], pointColor[2])
             self.drawPoint(particle.x)
 
-            glColor3ub(127, 0, 254)
+            glColor3ub(lineColor[0], lineColor[1], lineColor[2])
             for neighbor in particle.neighbors:
                 self.drawLine(particle.x, neighbor.x)
         glLineWidth(1)
+
+        if (particleSystem.is_sticked):
+            glColor3ub(255, 51, 51)
+            self.drawLine(particleSystem.stick_point1, particleSystem.particles[0].x)
+            self.drawLine(particleSystem.stick_point1, particleSystem.particles[1].x)
+            self.drawLine(particleSystem.stick_point2, particleSystem.particles[3].x)
+            self.drawLine(particleSystem.stick_point2, particleSystem.particles[4].x)
 
     def drawCube(self, height):
         #height = np.sqrt((end_point[0] ** 2) + (end_point[1] ** 2) + (end_point[2] ** 2))
