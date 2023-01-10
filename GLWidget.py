@@ -20,6 +20,10 @@ from Solver import Solver
 from ExternalForce import ExternalForce
 
 file_path = './motion_files/run.bvh'
+file_path_run = './motion_files/run.bvh'
+file_path_kick = './motion_files/kick.bvh'
+file_path_sit = './motion_files/sit.bvh'
+file_path_push = './motion_files/push.bvh'
 
 gCamAngle = np.radians(-55)
 gCamHeight = 12
@@ -55,8 +59,10 @@ class GLWidget(QOpenGLWidget):
 
         self.cube_system = self.makeParticleCube()
         self.foot_position = [100, 0, 100]
+        self.contact_part = "rFoot"
 
         self.cloak_system = None
+        self.integration = 1
         
         self.setMouseTracking(False)
         self.setAcceptDrops(True)
@@ -68,15 +74,25 @@ class GLWidget(QOpenGLWidget):
             self.warp_run = False
         else:
             self.warp_run = True
-            self.warp_motion = editor.makeMotionWarping(self.motion, self.ik_posture, self.warp_frame, 
+            self.warp_motion = editor.doMotionWarping(self.motion, self.ik_posture, self.warp_frame, 
                             max(2, self.warp_frame - self.warp_interval), min(self.number_of_frames-2, self.warp_frame + self.warp_interval), self.warp_type)
 
         self.repaint()
 
     def updateMotionWarp(self):
         self.current_frame = 0
-        self.warp_motion = editor.makeMotionWarping(self.motion, self.ik_posture, self.warp_frame, 
+        self.warp_motion = editor.doMotionWarping(self.motion, self.ik_posture, self.warp_frame, 
                             max(2, self.warp_frame - self.warp_interval), min(self.number_of_frames-2, self.warp_frame + self.warp_interval), self.warp_type)
+        self.repaint()
+
+    def initializeMotionStitch(self):
+        self.run = False
+        self.current_frame = 0
+        motion_run = BvhParser(file_path_run).getMotion()
+        motion_kick = BvhParser(file_path_kick).getMotion()
+        self.motion = editor.doMotionStitching(motion_run, motion_kick, 100)
+        self.number_of_frames = self.motion.number_of_frames
+
         self.repaint()
     
     def initializeGL(self):
@@ -104,9 +120,10 @@ class GLWidget(QOpenGLWidget):
         #ik_root_position = np.zeros(len(self.motion.posture_list[0].data))
         current_foot_position = self.foot_position
         if self.current_frame < self.motion.number_of_frames:
-            current_foot_position = self.motion.posture_list[self.current_frame].getJointPosition("rHand") # rHand rFoot
+            current_foot_position = self.motion.posture_list[self.current_frame].getJointPosition(self.contact_part) # rHand rFoot
         external = ExternalForce(10, self.foot_position, current_foot_position)
-        drawer.drawParticles(self.cube_system, self.run, self.fps, external, 12, (204, 154, 255), (127, 0, 254))
+        #drawer.drawParticles(self.cube_system, self.run, self.fps, external, 12, (204, 154, 255), (127, 0, 254))
+        drawer.drawParticles(self.integration, self.cube_system, self.run, self.fps, external, 12, (255, 153, 51), (204, 102, 0))
         self.foot_position = current_foot_position
 
         if self.current_frame == 0:
@@ -116,7 +133,7 @@ class GLWidget(QOpenGLWidget):
         if self.current_frame < self.motion.number_of_frames:
             self.cloak_system.stick_point1 = self.motion.posture_list[self.current_frame].getJointPosition("rShldr")
             self.cloak_system.stick_point2 = self.motion.posture_list[self.current_frame].getJointPosition("lShldr")
-        drawer.drawParticles(self.cloak_system, self.run, self.fps, None, 3, (255, 153, 51), (255, 51, 51))
+        drawer.drawParticles(self.integration, self.cloak_system, self.run, self.fps, None, 3, (255, 153, 51), (255, 51, 51))
 
         height = self.motion.posture_list[0].data[1]
         if (self.mode_ik > 0):
@@ -128,6 +145,7 @@ class GLWidget(QOpenGLWidget):
         if self.warp_run:
             drawer.drawMotion(self.warp_motion, self.current_frame)
         else:
+            pass
             drawer.drawMotion(self.motion, self.current_frame)
 
     def mouseMoveEvent(self, event: QtGui.QMouseEvent):
@@ -159,6 +177,7 @@ class GLWidget(QOpenGLWidget):
     def keyPressEvent(self, event: QtGui.QKeyEvent):
         global gCamDeltaX, gCamDeltaZ, gCamHeight
         self.run = False
+        #print("키보드 입력 " + str(event.key()))
         
         if event.key() == QtCore.Qt.Key.Key_W:
             gCamDeltaX += 10.
@@ -187,6 +206,24 @@ class GLWidget(QOpenGLWidget):
             self.moveObject(0, -10, 0)
         elif event.key() == QtCore.Qt.Key.Key_R:
             self.cube_system = self.makeParticleCube()
+        elif event.key() == QtCore.Qt.Key.Key_1:
+            self.initializeMotionKick()
+        elif event.key() == QtCore.Qt.Key.Key_2:
+            self.cube_system = self.makeParticleIcosahedron()
+        elif event.key() == QtCore.Qt.Key.Key_3:
+            self.integration = 0
+        elif event.key() == QtCore.Qt.Key.Key_4:
+            self.integration = 1
+        self.repaint()
+
+    def initializeMotionKick(self):
+        self.run = False
+        self.current_frame = 0
+        self.motion = BvhParser(file_path_kick).getMotion()
+        self.motion.number_of_frames = 220
+        self.number_of_frames = self.motion.number_of_frames
+        self.fps = self.motion.fps
+
         self.repaint()
 
     def dragEnterEvent(self, event: QtGui.QDragEnterEvent):
@@ -235,7 +272,8 @@ class GLWidget(QOpenGLWidget):
 
     def makeParticleCube(self):
         #offset = np.array([40, 60, 0]) # 40, 60, 0
-        offset = np.array([40, 360, 0])
+        #offset = np.array([40, 360, 0])
+        offset = np.array([-80, 60, 0])
 
         positions = [[15., 6., 0.], [15., 27., 21.], [-15., 21., 21.],
                         [-15., 0., 0.], [15., 27., -21.], [15., 48., 0.],
@@ -267,6 +305,37 @@ class GLWidget(QOpenGLWidget):
         cubeSystem.origin_positions = cubeSystem.getPositions()
 
         return cubeSystem
+
+    def makeParticleIcosahedron(self):
+        #offset = np.array([40, 60, 0]) # 40, 60, 0
+        #offset = np.array([40, 360, 0])
+        offset = np.array([-80, 60, 0])
+
+        X = 0.526 * 30
+        Z = 0.851 * 30
+
+        positions = [[-X, 0.0, Z], [X, 0.0, Z], [-X, 0.0, -Z], [X, 0.0, -Z],    
+                    [0.0, Z, X], [0.0, Z, -X], [0.0, -Z, X], [0.0, -Z, -X],    
+                    [Z, X, 0.0], [-Z, X, 0.0], [Z, -X, 0.0], [-Z, -X, 0.0]]
+        mass = 10
+
+        icoSystem = ParticleSystem()
+
+        for i in range(12):
+            particle = Particle()
+            particle.x = positions[i] + offset
+            particle.m = mass
+
+            icoSystem.particles.append(particle)
+
+        icoSystem.connection = [[1,4,6,9,11], [0,4,6,8,10], [3,5,7,9,11], [2,5,7,8,10],
+                                [0,1,5,8,9], [2,3,4,8,9], [0,1,7,10,11], [2,3,6,10,11],
+                                [1,3,4,5,10], [0,2,4,5,11], [1,3,6,7,8], [0,2,6,7,9]]
+
+        icoSystem.initNeighborParticles()
+        icoSystem.origin_positions = icoSystem.getPositions()
+
+        return icoSystem
 
     def makeParticleCloak(self, offset1, offset2):
         neck_point = np.array(offset1) + np.array(offset2)
