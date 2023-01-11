@@ -1,4 +1,10 @@
 import numpy as np
+from MatrixUtil import *
+from Particle import Particle
+from GravityForce import GravityForce
+from ViscousForce import ViscousForce
+from SpringForce import SpringForce
+from FrictionForce import FrictionForce
 
 class Solver:
     def __init__(self):
@@ -13,57 +19,52 @@ class Solver:
         self.friction_coefficient = 0.42
         self.particle_velocity_threshold = 0.001
 
-    def getGravityForce(self, particle):
-        F_Gravity = np.zeros(3)
-
-        F_Gravity[1] = particle.m * self.G
-
-        return F_Gravity
-
-    def getViscousDragForce(self, particle):
-        F_Viscous = -self.k_viscous * np.array(particle.v)
-
-        return F_Viscous
-
-    def getSpringForce(self, p1, p2, r):
-        d_x = np.array(p1.x) - np.array(p2.x)
-        ld_xl = self.getParticleDistance(p1.x, p2.x)
-        d_v = np.array(p1.v) - np.array(p2.v)
-
-        F_Spring = -((self.k_s * (ld_xl - r) + self.k_d * (np.dot(d_v, d_x.T) / ld_xl)) * (d_x / ld_xl))
-        return F_Spring
-
-    def getFrictionForce(self, particle):
-        Fn = np.array([0, -((particle.m * self.G) + particle.f[1]), 0])
-        lFnl = np.sqrt(np.sum(Fn**2))
-        Vt = np.array([particle.v[0], 0, particle.v[2]])
-        lVtl = np.sqrt(np.sum(Vt**2))
-
-        F_Friction = -(self.friction_coefficient * lFnl * (Vt / lVtl))
-        return F_Friction
-
     def calculateForces(self, particleSystem):
         for i in range(len(particleSystem.particles)):
             particle = particleSystem.particles[i]
             F = np.zeros(3)
 
             # Gravity Force (Y direction)
-            F += self.getGravityForce(particle)
+            gravity = GravityForce(self.G)
+            F += gravity.getForce(particle)
 
             # Viscous Drag Force
-            F += self.getViscousDragForce(particle)
+            viscous = ViscousForce(self.k_viscous)
+            F += viscous.getForce(particle)
 
             # Damped Spring Force
+            spring = SpringForce(self.k_s, self.k_d)
             for j in particleSystem.connection[i]:
                 neighbor = particleSystem.particles[j]
-                r = self.getParticleDistance(particleSystem.origin_positions[i], particleSystem.origin_positions[j])
-                F += self.getSpringForce(particle, neighbor, r)
+                r = getParticleDistance(particleSystem.origin_positions[i], particleSystem.origin_positions[j])
+                F += spring.getForce(particle, neighbor, r)
+
+            # Sticked Spring Force
+            if (particleSystem.is_sticked):
+                stick = Particle()
+                if (i == 0):
+                    stick.x = particleSystem.stick_point1
+                    F += spring.getForce(particle, stick, 9.)
+                elif (i == 1):
+                    stick.x = particleSystem.stick_point1
+                    F += spring.getForce(particle, stick, 2.)
+                elif (i == 3):
+                    stick.x = particleSystem.stick_point2
+                    F += spring.getForce(particle, stick, 2.)
+                elif (i == 4):
+                    stick.x = particleSystem.stick_point2
+                    F += spring.getForce(particle, stick, 9.)
+                F += [0, 0, -200]
 
             # apply Force
             particle.f = F
 
-    def getParticleDerivative(self, particleSystem):
+    def getParticleDerivative(self, particleSystem, externalForce):
         self.calculateForces(particleSystem)
+
+        if (externalForce != None and externalForce.detectContact(particleSystem)):
+            externalForce.applyForce(particleSystem)
+            #print("공이 충돌했습니다!!")
 
         derivative = []
         for particle in particleSystem.particles:
@@ -88,10 +89,12 @@ class Solver:
     def collisionResponse(self, particleSystem, collision, delta_t):
         if len(collision) == 0:
             return
+        friction = FrictionForce(self.G, self.friction_coefficient)
+
         for i in collision:
             particle = particleSystem.particles[i]
 
-            F_Friction = self.getFrictionForce(particle)
+            F_Friction = friction.getForce(particle)
             particle.v += (F_Friction / particle.m) * delta_t
 
             # Collision Response
@@ -100,8 +103,8 @@ class Solver:
 
             particle.v = Vt - self.k_r * Vn
 
-    def eulerStep(self, particleSystem, delta_t):
-        derivative = np.array(self.getParticleDerivative(particleSystem))
+    def eulerStep(self, particleSystem, delta_t, externalForce):
+        derivative = np.array(self.getParticleDerivative(particleSystem, externalForce))
         current = np.array(particleSystem.getState())
         particleSystem.setState(current + derivative * delta_t)
         
@@ -117,8 +120,8 @@ class Solver:
 
         particleSystem.time = particleSystem.time + delta_t
 
-    def semiImplicitEulerStep(self, particleSystem, delta_t):
-        derivative = np.array(self.getParticleDerivative(particleSystem))
+    def semiImplicitEulerStep(self, particleSystem, delta_t, externalForce):
+        derivative = np.array(self.getParticleDerivative(particleSystem, externalForce))
 
         for i in range(len(particleSystem.particles)):
             derivative[i*6 : i*6+3] += delta_t * derivative[i*6+3 : i*6+6]
@@ -136,11 +139,6 @@ class Solver:
                 particle.v = [0, 0, 0]
 
         particleSystem.time = particleSystem.time + delta_t
-
-    def getParticleDistance(self, position_1, porition_2):
-        diff = np.array(position_1) - np.array(porition_2)
-
-        return np.sqrt(np.sum(diff**2))
 
 
             
